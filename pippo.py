@@ -1,0 +1,3 @@
+import numpy as np
+data=np.load('generated_hidden_states/labels__model_name_lama__parallelize_False__dataset_name_imdb__split_test__prompt_idx_0__batch_size_1__num_examples_1000__use_decoder_False__layer_-1__all_layers_False__token_idx_-1.npy', allow_pickle=True)
+print(data)
