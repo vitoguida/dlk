@@ -325,28 +325,83 @@ class LocalContrastDataset(Dataset):
     def __len__(self):
         return len(self.raw_dataset)
 
-    def encode(self, question, answer):
+    def encode(self, nl_prompt):
+        # get question and answer from prompt
+        question, answer = nl_prompt
+
+        # tokenize the question and answer (depending upon the model type and whether self.use_decoder is True)
         if self.model_type == "encoder_decoder":
+            input_ids = self.get_encoder_decoder_input_ids(question, answer)
+        elif self.model_type == "encoder":
+            input_ids = self.get_encoder_input_ids(question, answer)
+        else:
+            input_ids = self.get_decoder_input_ids(question, answer)
+
+        # get rid of the batch dimension since this will be added by the Dataloader
+        if input_ids["input_ids"].shape[0] == 1:
+            for k in input_ids:
+                input_ids[k] = input_ids[k].squeeze(0)
+
+        return input_ids
+
+
+    def get_encoder_input_ids(self, question, answer):
+        """
+        Format the input ids for encoder-only models; standard formatting.
+        """
+        combined_input = question + " " + answer
+        input_ids = self.tokenizer(combined_input, truncation=True, padding="max_length", return_tensors="pt")
+
+        return input_ids
+
+    def get_decoder_input_ids(self, question, answer):
+        """
+        Format the input ids for encoder-only models.
+        This is the same as get_encoder_input_ids except that we add the EOS token at the end of the input (which apparently can matter)
+        """
+        combined_input = question + " " + answer + self.tokenizer.eos_token
+        input_ids = self.tokenizer(combined_input, truncation=True, padding="max_length", return_tensors="pt")
+
+        return input_ids
+
+    def get_encoder_decoder_input_ids(self, question, answer):
+        """
+        Format the input ids for encoder-decoder models.
+        There are two cases for this, depending upon whether we want to use the encoder hidden states or the decoder hidden states.
+        """
+        if self.use_decoder:
+            # feed the same question to the encoder but different answers to the decoder to construct contrast pairs
+            input_ids = self.tokenizer(question, truncation=True, padding="max_length", return_tensors="pt")
+            decoder_input_ids = self.tokenizer(answer, truncation=True, padding="max_length", return_tensors="pt")
+        else:
+            # include both the question and the answer in the input for the encoder
+            # feed the empty string to the decoder (i.e. just ignore it -- but it needs an input or it'll throw an error)
             input_ids = self.tokenizer(question, answer, truncation=True, padding="max_length", return_tensors="pt")
             decoder_input_ids = self.tokenizer("", return_tensors="pt")
-            input_ids["decoder_input_ids"] = decoder_input_ids["input_ids"]
-            input_ids["decoder_attention_mask"] = decoder_input_ids["attention_mask"]
-        else:
-            input_ids = self.tokenizer(question + " " + answer, truncation=True, padding="max_length",
-                                       return_tensors="pt")
 
-        return {k: v.squeeze(0) for k, v in input_ids.items()}
+        # move everything into input_ids so that it's easier to pass to the model
+        input_ids["decoder_input_ids"] = decoder_input_ids["input_ids"]
+        input_ids["decoder_attention_mask"] = decoder_input_ids["attention_mask"]
+
+        return input_ids
 
     def __getitem__(self, index):
         data = self.raw_dataset[index]
-        film = data["title"]
-        question = f"Is {data} part of the movielens dataset? Answer only with yes or no."
+        film = data["text"]
+        question_p = f"this movie : {film} is part of the MovieLens1M dataset?"
+        question_n = f"this movie : {film} is not part of the MovieLens1M dataset?"
 
-        neg_answer, pos_answer = "No", "Yes"
-        neg_ids = self.encode(question, neg_answer)
-        pos_ids = self.encode(question, pos_answer)
+        pos_prompt = {"text": question_p, "label": 1}
+        neg_prompt = {"text": question_n, "label": 0}
 
-        return neg_ids, pos_ids, question, neg_answer, pos_answer
+
+        pos_ids = self.encode(pos_prompt)
+        neg_ids = self.encode(neg_prompt)
+
+        true_answer = data["label"]
+
+        return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
+
 
 
 
@@ -354,7 +409,16 @@ def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=1
                          model_type="encoder_decoder", use_decoder=False, device="cuda",
                          pin_memory=True, num_workers=1):
     movies = pd.read_csv(file_path, sep="::", engine="python", names=["movie_id", "title", "genre"], encoding="latin-1")
+    movies['text'] = movies["movie_id"].astype(str) + " " + movies['title'] + " " + movies['genre']
+
+    # Crea una colonna vuota 'label'
+    movies['label'] = 1
+
+    # Seleziona solo le colonne che ti servono: 'title_genre' e 'label'
+    movies = movies[['text', 'label']]
+
     raw_dataset = HFDataset.from_pandas(movies)
+
     contrast_dataset = LocalContrastDataset(raw_dataset, tokenizer, model_type=model_type, use_decoder=use_decoder,
                                             device=device)
 
