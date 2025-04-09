@@ -1,4 +1,5 @@
 import argparse
+import random as rnd
 import copy
 import os
 import pandas as pd
@@ -13,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM, \
     PreTrainedTokenizer
+np.random.seed(123)
 
 ############# Model loading and result saving #############
 
@@ -388,11 +390,13 @@ class LocalContrastDataset(Dataset):
     def __getitem__(self, index):
         data = self.raw_dataset[index]
         film = data["text"]
-        question_p = f"this movie : {film} is part of the MovieLens1M dataset?"
-        question_n = f"this movie : {film} is not part of the MovieLens1M dataset?"
+        question = f"Is {film} part of the MovieLens1M dataset?"
+        #question_n = f"Is {film} part of the MovieLens1M dataset?"
 
-        pos_prompt = {"text": question_p, "label": 1}
-        neg_prompt = {"text": question_n, "label": 0}
+        pos_prompt = {"text": question, "label": 'Yes'}
+        neg_prompt = {"text": question, "label": 'No'}
+        pos_prompt = [pos_prompt["text"], pos_prompt["label"]]
+        neg_prompt = [neg_prompt["text"], neg_prompt["label"]]
 
 
         pos_ids = self.encode(pos_prompt)
@@ -405,19 +409,27 @@ class LocalContrastDataset(Dataset):
 
 
 
-def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
+def get_local_dataloader(file_path, path_fake_df, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
                          model_type="encoder_decoder", use_decoder=False, device="cuda",
                          pin_memory=True, num_workers=1):
     movies = pd.read_csv(file_path, sep="::", engine="python", names=["movie_id", "title", "genre"], encoding="latin-1")
-    movies['text'] = movies["movie_id"].astype(str) + " " + movies['title'] + " " + movies['genre']
-
-    # Crea una colonna vuota 'label'
+    #movies['text'] = movies["movie_id"].astype(str) + " " + movies['title'] + " " + movies['genre']
+    movies['text'] = movies['title']
     movies['label'] = 1
-
     # Seleziona solo le colonne che ti servono: 'title_genre' e 'label'
     movies = movies[['text', 'label']]
 
-    raw_dataset = HFDataset.from_pandas(movies)
+    fake_df = pd.read_csv(path_fake_df, on_bad_lines='skip')
+    fake_df = fake_df[['title']]
+    fake_df.rename(columns={'title': 'text'}, inplace=True)
+    fake_df = fake_df.sample(n = len(movies), random_state = 42)
+    fake_df['label'] = 0
+    fake_df = fake_df[['text', 'label']]
+
+    final_df = pd.concat([movies[['text', 'label']], fake_df], ignore_index=True)
+    final_df = final_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    raw_dataset = HFDataset.from_pandas(final_df)
 
     contrast_dataset = LocalContrastDataset(raw_dataset, tokenizer, model_type=model_type, use_decoder=use_decoder,
                                             device=device)
@@ -427,9 +439,6 @@ def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=1
                             num_workers=num_workers)
 
     return dataloader
-
-
-
 
 
 

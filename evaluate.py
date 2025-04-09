@@ -13,17 +13,17 @@ def main(args, generation_args):
         pos_hs = pos_hs.squeeze(1)
 
     # Very simple train/test split (using the fact that the data is already shuffled)
-    neg_hs_train, neg_hs_test = neg_hs[:len(neg_hs) // 2], neg_hs[len(neg_hs) // 2:]
-    pos_hs_train, pos_hs_test = pos_hs[:len(pos_hs) // 2], pos_hs[len(pos_hs) // 2:]
-    y_train, y_test = y[:len(y) // 2], y[len(y) // 2:]
+    neg_hs_train, neg_hs_test = neg_hs[:int(len(neg_hs) * 0.7)], neg_hs[int(len(neg_hs) * 0.7):]
+    pos_hs_train, pos_hs_test = pos_hs[:int(len(pos_hs) * 0.7)], pos_hs[int(len(pos_hs) * 0.7):]
+    y_train, y_test = y[:int(len(y) * 0.7)], y[int(len(y) * 0.7):]
 
     # Make sure logistic regression accuracy is reasonable; otherwise our method won't have much of a chance of working
     # you can also concatenate, but this works fine and is more comparable to CCS inputs
     x_train = neg_hs_train - pos_hs_train  
     x_test = neg_hs_test - pos_hs_test
-    """lr = LogisticRegression(class_weight="balanced")
+    lr = LogisticRegression(class_weight="balanced")
     lr.fit(x_train, y_train)
-    print("Logistic regression accuracy: {}".format(lr.score(x_test, y_test)))"""
+    print("Logistic regression accuracy: {}".format(lr.score(x_test, y_test)))
 
     # Set up CCS. Note that you can usually just use the default args by simply doing ccs = CCS(neg_hs, pos_hs, y)
     ccs = CCS(neg_hs_train, pos_hs_train, nepochs=args.nepochs, ntries=args.ntries, lr=args.lr, batch_size=args.ccs_batch_size, 
