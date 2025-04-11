@@ -10,11 +10,13 @@ import torch.nn.functional as F
 from datasets import load_dataset,Dataset as HFDataset
 # make sure to install promptsource, transformers, and datasets!
 from promptsource.templates import DatasetTemplates
+from sklearn.feature_extraction.text import CountVectorizer
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM, \
     PreTrainedTokenizer
 np.random.seed(123)
+
 
 ############# Model loading and result saving #############
 
@@ -27,7 +29,8 @@ model_mapping = {
     "deberta-mnli": "microsoft/deberta-xxlarge-v2-mnli",
     "deberta": "microsoft/deberta-xxlarge-v2",
     "roberta-mnli": "roberta-large-mnli",
-    "lama": "meta-llama/Llama-3.2-1B-Instruct"
+    "lama": "meta-llama/Llama-3.2-1B-Instruct",
+    "lama3B": "meta-llama/Llama-3.2-3B-Instruct"
 }
 
 
@@ -331,6 +334,7 @@ class LocalContrastDataset(Dataset):
         # get question and answer from prompt
         question, answer = nl_prompt
 
+
         # tokenize the question and answer (depending upon the model type and whether self.use_decoder is True)
         if self.model_type == "encoder_decoder":
             input_ids = self.get_encoder_decoder_input_ids(question, answer)
@@ -351,7 +355,8 @@ class LocalContrastDataset(Dataset):
         """
         Format the input ids for encoder-only models; standard formatting.
         """
-        combined_input = question + " " + answer
+        #combined_input = question + " " + answer
+        combined_input = question
         input_ids = self.tokenizer(combined_input, truncation=True, padding="max_length", return_tensors="pt")
 
         return input_ids
@@ -361,7 +366,7 @@ class LocalContrastDataset(Dataset):
         Format the input ids for encoder-only models.
         This is the same as get_encoder_input_ids except that we add the EOS token at the end of the input (which apparently can matter)
         """
-        combined_input = question + " " + answer + self.tokenizer.eos_token
+        combined_input = question + self.tokenizer.eos_token
         input_ids = self.tokenizer(combined_input, truncation=True, padding="max_length", return_tensors="pt")
 
         return input_ids
@@ -387,28 +392,129 @@ class LocalContrastDataset(Dataset):
 
         return input_ids
 
+    ####################questa va bene per movies#################################################
     def __getitem__(self, index):
         data = self.raw_dataset[index]
         film = data["text"]
-        question = f"Is {film} part of the MovieLens1M dataset?"
-        #question_n = f"Is {film} part of the MovieLens1M dataset?"
+        question_p = f"Is {film} part of the MovieLens1M dataset? Yes"
+        question_n = f"Is {film} part of the MovieLens1M dataset? No"
 
-        pos_prompt = {"text": question, "label": 'Yes'}
-        neg_prompt = {"text": question, "label": 'No'}
+
+        if data["label"] == 1:
+            pos_prompt = {"text": question_p, "label": 1}
+            neg_prompt = {"text": question_n, "label": 0}
+            true_answer = data["label"]
+
+        if data["label"] == 0:
+            pos_prompt = {"text": question_p, "label": 0}
+            neg_prompt = {"text": question_n, "label": 1}
+            true_answer = data["label"]
+
         pos_prompt = [pos_prompt["text"], pos_prompt["label"]]
         neg_prompt = [neg_prompt["text"], neg_prompt["label"]]
+        pos_ids = self.encode(pos_prompt)
+        neg_ids = self.encode(neg_prompt)
 
+
+        print("positivo " + str(pos_prompt))
+        print("negativo " + str(neg_prompt))
+        return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
+
+
+    """ #######################questa va bene per users#############################
+    def __getitem__(self, index):
+            data = self.raw_dataset[index]
+            user = data["text"]
+            question_p = f"Is this user record in MovieLens1M ' {user} ' correct? Yes"
+            question_n = f"Is this user record in MovieLens1M ' {user} ' correct? No"
+
+            if data["label"] == 1:
+                pos_prompt = {"text": question_p, "label": 1}
+                neg_prompt = {"text": question_n, "label": 0}
+                true_answer = data["label"]
+                
+            if data["label"] == 0:
+                pos_prompt = {"text": question_p, "label": 0}
+                neg_prompt = {"text": question_n, "label": 1}
+                true_answer = data["label"]
+            
+            pos_prompt = [pos_prompt["text"], pos_prompt["label"]]
+            neg_prompt = [neg_prompt["text"], neg_prompt["label"]]
+
+
+
+            pos_ids = self.encode(pos_prompt)
+            neg_ids = self.encode(neg_prompt)
+
+            return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer"""
+
+
+
+ #######################questa va bene per Ratings#############################
+    """def __getitem__(self, index):
+        data = self.raw_dataset[index]
+        rating = data["text"]
+        question_p = f"Is this interaction {rating} part of the MovieLens1M dataset? Yes"
+        question_n = f"Is this interaction {rating} part of the MovieLens1M dataset? no"
+
+        if data["label"] == 1:
+            pos_prompt = {"text": question_p, "label": 1}
+            neg_prompt = {"text": question_n, "label": 0}
+            true_answer = data["label"]
+
+        if data["label"] == 0:
+            pos_prompt = {"text": question_p, "label": 0}
+            neg_prompt = {"text": question_n, "label": 1}
+            true_answer = data["label"]
+
+        pos_prompt = [pos_prompt["text"], pos_prompt["label"]]
+        neg_prompt = [neg_prompt["text"], neg_prompt["label"]]
 
         pos_ids = self.encode(pos_prompt)
         neg_ids = self.encode(neg_prompt)
 
-        true_answer = data["label"]
-
-        return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
+        return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer"""
 
 
+#############################questa va ben per ratings #######################################
+"""def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
+                         model_type="encoder_decoder", use_decoder=False, device="cuda",
+                         pin_memory=True, num_workers=1):
+    ratings = pd.read_csv('dataset/ml-1m/ratings.dat', sep="::", engine="python",
+                       names=["UserID", "MovieID", "Rating", "Timestamp"], encoding="latin-1")
+    ratings.drop(columns=['Timestamp'], inplace=True)
 
 
+    score = [1, 2, 3, 4, 5]
+
+
+    fake_ratings = ratings.copy()
+    fake_ratings['Rating'] = np.random.choice(score, size=len(ratings))
+    fake_ratings['MovieID'] = np.random.randint(4000, 6001, size=len(ratings))
+
+    ratings['text'] = ratings.apply(lambda row: '::'.join(row.astype(str)), axis=1)
+    ratings['label'] = 1
+    fake_ratings['text'] = fake_ratings.apply(lambda row: '::'.join(row.astype(str)), axis=1)
+    fake_ratings['label'] = 0
+
+
+    final_df = pd.concat([ratings[['text', 'label']], fake_ratings[['text','label']]], ignore_index=True)
+    final_df = final_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    #final_df.to_csv('users_ant.csv', sep=",", index=False)
+
+    raw_dataset = HFDataset.from_pandas(final_df)
+
+    contrast_dataset = LocalContrastDataset(raw_dataset, tokenizer, model_type=model_type, use_decoder=use_decoder,
+                                            device=device)
+
+    subset_dataset = torch.utils.data.Subset(contrast_dataset, list(range(min(num_examples, len(contrast_dataset)))))
+    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
+                            num_workers=num_workers)
+
+    return dataloader"""
+
+
+"""    #questa va bene per movies senza generazione
 def get_local_dataloader(file_path, path_fake_df, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
                          model_type="encoder_decoder", use_decoder=False, device="cuda",
                          pin_memory=True, num_workers=1):
@@ -425,6 +531,91 @@ def get_local_dataloader(file_path, path_fake_df, tokenizer: PreTrainedTokenizer
     fake_df = fake_df.sample(n = len(movies), random_state = 42)
     fake_df['label'] = 0
     fake_df = fake_df[['text', 'label']]
+    final_df = pd.concat([movies[['text', 'label']], fake_df], ignore_index=True)
+    final_df = final_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    raw_dataset = HFDataset.from_pandas(final_df)
+
+    contrast_dataset = LocalContrastDataset(raw_dataset, tokenizer, model_type=model_type, use_decoder=use_decoder,
+                                            device=device)
+
+    subset_dataset = torch.utils.data.Subset(contrast_dataset, list(range(min(num_examples, len(contrast_dataset)))))
+    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
+                            num_workers=num_workers)
+
+    return dataloader"""
+
+"""#############################questa va ben per users #######################################
+def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
+                         model_type="encoder_decoder", use_decoder=False, device="cuda",
+                         pin_memory=True, num_workers=1):
+    user = pd.read_csv('dataset/ml-1m/users.dat', sep="::", engine="python",
+                       names=["UserID", "Gender", "Age", "Occupation", "Zip-code"], encoding="latin-1")
+    user.drop(columns=['Gender'], inplace=True)
+
+    #genders = ['M', 'F']
+    ages = [1, 18, 25, 35, 45, 50, 56]
+    occupations = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+
+    fake_user = user.copy()
+    #fake_user['Gender'] = np.random.choice(genders, size=len(user))
+    fake_user['Age'] = np.random.choice(ages, size=len(user))
+    fake_user['Occupation'] = np.random.choice(occupations, size=len(user))
+
+    user['text'] = user.apply(lambda row: '::'.join(row.astype(str)), axis=1)
+    user['label'] = 1
+    fake_user['text'] = fake_user.apply(lambda row: '::'.join(row.astype(str)), axis=1)
+    fake_user['label'] = 0
+
+
+    final_df = pd.concat([user[['text', 'label']], fake_user[['text','label']]], ignore_index=True)
+    final_df = final_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    final_df.to_csv('users_ant.csv', sep=",", index=False)
+
+    raw_dataset = HFDataset.from_pandas(final_df)
+
+    contrast_dataset = LocalContrastDataset(raw_dataset, tokenizer, model_type=model_type, use_decoder=use_decoder,
+                                            device=device)
+
+    subset_dataset = torch.utils.data.Subset(contrast_dataset, list(range(min(num_examples, len(contrast_dataset)))))
+    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
+                            num_workers=num_workers)
+
+    return dataloader"""
+
+"""
+qui sta fatta la prova con la generazione di titoli falsi storymanjii movies
+#################questa appartiene a movies con i titoli generati toymanjiiii#############
+"""
+def generate_fake_titles(titles, ngram_range=(2, 5), num_fake_titles=3800):
+    # Creiamo un modello di CountVectorizer per ottenere n-grammi (parole o sequenze di parole)
+    vectorizer = CountVectorizer(ngram_range=ngram_range, stop_words='english')
+    X = vectorizer.fit_transform(titles)
+    ngrams = vectorizer.get_feature_names_out()
+
+    # Funzione per creare un titolo finto a partire da n-grammi
+    def create_fake_title():
+        # Selezioniamo un n-gramma a caso
+        ngram = rnd.choice(ngrams)
+        return ngram
+
+    # Generiamo un numero di titoli finti
+    fake_titles = [create_fake_title() for _ in range(num_fake_titles)]
+    return fake_titles
+#################questa appartiene a movies con i titoli generati toymanjiiii#############
+def get_local_dataloader(file_path, tokenizer: PreTrainedTokenizer, batch_size=16, num_examples=1000,
+                         model_type="encoder_decoder", use_decoder=False, device="cuda",
+                         pin_memory=True, num_workers=1):
+    movies = pd.read_csv(file_path, sep="::", engine="python", names=["movie_id", "title", "genre"], encoding="latin-1")
+    #movies['text'] = movies["movie_id"].astype(str) + " " + movies['title'] + " " + movies['genre']
+    movies['text'] = movies['title']
+    movies['label'] = 1
+    # Seleziona solo le colonne che ti servono: 'title_genre' e 'label'
+    movies = movies[['text', 'label']]
+
+    fake_titles = generate_fake_titles(movies['text'], num_fake_titles=len(movies))
+    fake_df = pd.DataFrame({'text': fake_titles, 'label': 0})  # Etichetta 0 per i titoli "falsi"
+
 
     final_df = pd.concat([movies[['text', 'label']], fake_df], ignore_index=True)
     final_df = final_df.sample(frac=1, random_state=42).reset_index(drop=True)

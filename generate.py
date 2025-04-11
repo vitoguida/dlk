@@ -6,9 +6,17 @@ def main(args):
     model, tokenizer, model_type = load_model(args.model_name, args.cache_dir, args.parallelize, args.device)
 
     print("Loading dataloader")
-    """dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, args.prompt_idx, batch_size=args.batch_size,
-                               num_examples=args.num_examples, model_type=model_type, use_decoder=args.use_decoder, device=args.device)"""
-    dataloader = get_local_dataloader("dataset/ml-1m/movies.dat","dataset/books/books.csv",tokenizer, batch_size=args.batch_size,num_examples=args.num_examples, model_type=model_type, device=args.device)
+    #dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, args.prompt_idx, batch_size=args.batch_size,
+                               #num_examples=args.num_examples, model_type=model_type, use_decoder=args.use_decoder, device=args.device)
+    #movies
+    #dataloader = get_local_dataloader("dataset/ml-1m/movies.dat","dataset/books/books.csv",tokenizer, batch_size=args.batch_size,num_examples=args.num_examples, model_type=model_type, device=args.device)
+    #questa va bene per movies con parole generate
+    dataloader = get_local_dataloader("dataset/ml-1m/movies.dat", tokenizer, batch_size=args.batch_size,num_examples=args.num_examples, model_type=model_type, device=args.device)
+
+    #users
+    #dataloader = get_local_dataloader("dataset/ml-1m/users.dat", tokenizer, batch_size=args.batch_size,num_examples=args.num_examples, model_type=model_type, device=args.device)
+    #dataloader = get_local_dataloader("dataset/ml-1m/ratings.dat", tokenizer, batch_size=args.batch_size,num_examples=args.num_examples, model_type=model_type, device=args.device)
+
 
 
     # Get the hidden states and labels

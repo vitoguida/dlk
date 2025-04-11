@@ -1,5 +1,6 @@
 from sklearn.linear_model import LogisticRegression
 from utils import get_parser, load_all_generations, CCS
+from sklearn.model_selection import train_test_split
 
 def main(args, generation_args):
     # load hidden states and labels
@@ -13,9 +14,14 @@ def main(args, generation_args):
         pos_hs = pos_hs.squeeze(1)
 
     # Very simple train/test split (using the fact that the data is already shuffled)
-    neg_hs_train, neg_hs_test = neg_hs[:int(len(neg_hs) * 0.7)], neg_hs[int(len(neg_hs) * 0.7):]
+    """neg_hs_train, neg_hs_test = neg_hs[:int(len(neg_hs) * 0.7)], neg_hs[int(len(neg_hs) * 0.7):]
     pos_hs_train, pos_hs_test = pos_hs[:int(len(pos_hs) * 0.7)], pos_hs[int(len(pos_hs) * 0.7):]
-    y_train, y_test = y[:int(len(y) * 0.7)], y[int(len(y) * 0.7):]
+    y_train, y_test = y[:int(len(y) * 0.7)], y[int(len(y) * 0.7):]"""
+
+    neg_hs_train, neg_hs_test = train_test_split(neg_hs, test_size=0.4, random_state=42)
+    pos_hs_train, pos_hs_test = train_test_split(pos_hs, test_size=0.4, random_state=42)
+
+    y_train, y_test = train_test_split(y, test_size=0.4, random_state=42)
 
     # Make sure logistic regression accuracy is reasonable; otherwise our method won't have much of a chance of working
     # you can also concatenate, but this works fine and is more comparable to CCS inputs
@@ -34,6 +40,29 @@ def main(args, generation_args):
     ccs.repeated_train()
     ccs_acc = ccs.get_acc(neg_hs_test, pos_hs_test, y_test)
     print("CCS accuracy: {}".format(ccs_acc))
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+
+    # Calcola le differenze
+    x = neg_hs - pos_hs  # shape: (N, D)
+
+    # Applica PCA per ridurre a 2 dimensioni
+    pca = PCA(n_components=2)
+    x_pca = pca.fit_transform(x)
+
+    # Visualizza
+    plt.figure(figsize=(8, 6))
+    plt.scatter(x_pca[y == 0, 0], x_pca[y == 0, 1], c='red', label='Classe 0', alpha=0.6)
+    plt.scatter(x_pca[y == 1, 0], x_pca[y == 1, 1], c='blue', label='Classe 1', alpha=0.6)
+    plt.title('PCA delle differenze neg_hs - pos_hs')
+    plt.xlabel('PC 1')
+    plt.ylabel('PC 2')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
